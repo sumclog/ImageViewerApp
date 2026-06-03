@@ -1,3 +1,6 @@
+using MyImageViewer.Data;
+using MyImageViewer.UI;
+
 namespace MyImageViewer
 {
     internal static class Program
@@ -11,7 +14,11 @@ namespace MyImageViewer
             // To customize application configuration such as set high DPI settings or default font,
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
-            Application.Run(new Form1());
+
+            // Инициализируем базу данных перед запуском приложения
+            DatabaseContext.Initialize();
+
+            Application.Run(new MainForm());
         }
     }
 }
