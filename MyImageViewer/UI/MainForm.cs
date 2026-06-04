@@ -38,6 +38,19 @@ namespace MyImageViewer.UI
 
             // Загружаем папки при загрузке формы
             this.Load += MainForm_Load;
+
+            // Очищаем ресурсы при закрытии
+            this.FormClosing += MainForm_FormClosing;
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // Освобождаем предпросмотр
+            if (pictureBoxPreview.Image != null)
+            {
+                pictureBoxPreview.Image.Dispose();
+                pictureBoxPreview.Image = null;
+            }
         }
 
         private void MainForm_Load(object sender, EventArgs e)
@@ -453,6 +466,53 @@ namespace MyImageViewer.UI
         private void listThumbs_SelectedIndexChanged(object sender, EventArgs e)
         {
             UpdateStatusBar();
+            ShowPreviewInPanel();
+        }
+
+        /// <summary>
+        /// Показать предпросмотр выбранного изображения в pictureBoxPreview
+        /// </summary>
+        private void ShowPreviewInPanel()
+        {
+            if (listThumbs.SelectedItems.Count == 0)
+            {
+                pictureBoxPreview.Image = null;
+                return;
+            }
+
+            try
+            {
+                ImageFile selectedImage = listThumbs.SelectedItems[0].Tag as ImageFile;
+                if (selectedImage == null)
+                {
+                    pictureBoxPreview.Image = null;
+                    return;
+                }
+
+                // Освобождаем старое изображение
+                if (pictureBoxPreview.Image != null)
+                {
+                    pictureBoxPreview.Image.Dispose();
+                }
+
+                // Загружаем полное изображение (не миниатюру)
+                ImageService imageService = new ImageService();
+                Bitmap fullImage = imageService.LoadImage(selectedImage.FullPath);
+
+                if (fullImage != null)
+                {
+                    pictureBoxPreview.Image = fullImage;
+                }
+                else
+                {
+                    pictureBoxPreview.Image = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки предпросмотра: {ex.Message}");
+                pictureBoxPreview.Image = null;
+            }
         }
 
         /// <summary>
@@ -501,6 +561,11 @@ namespace MyImageViewer.UI
         }
 
         private void splitContainer1_Panel1_Paint(object sender, PaintEventArgs e)
+        {
+
+        }
+
+        private void MainForm_Load_1(object sender, EventArgs e)
         {
 
         }
