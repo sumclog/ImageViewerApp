@@ -31,6 +31,13 @@ namespace MyImageViewer.UI
             _thumbnailService = new ThumbnailService();
             _currentImages = new List<ImageFile>();
 
+            // Инициализация ImageList с оптимальным размером
+            imgListThumbs.ImageSize = new Size(120, 120);
+            imgListThumbs.ColorDepth = ColorDepth.Depth32Bit;
+
+            // Привязываем ImageList к ListView
+            listThumbs.LargeImageList = imgListThumbs;
+
             // Инициализация BackgroundWorker для загрузки миниатюр
             thumbWorker.DoWork += ThumbWorker_DoWork;
             thumbWorker.ProgressChanged += ThumbWorker_ProgressChanged;
@@ -70,8 +77,7 @@ namespace MyImageViewer.UI
         }
 
         /// <summary>
-        /// Инициализировать TreeView со всеми логическими дисками компьютера
-        /// Использует "ленивую загрузку" (Lazy Loading) для экономии ресурсов
+        /// Инициализировать TreeView с "Избранным" и дисками как в FastStone
         /// </summary>
         private void InitializeTreeView()
         {
@@ -79,39 +85,126 @@ namespace MyImageViewer.UI
 
             try
             {
-                // Получаем все логические диски (C:\, D:\, E:\ и т.д.)
+                // 1. Добавляем раздел "Избранное" со специальными папками
+                TreeNode favoritesNode = new TreeNode("Избранное")
+                {
+                    Tag = null
+                };
+
+                // Рабочий стол
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                if (Directory.Exists(desktopPath))
+                {
+                    TreeNode desktopNode = new TreeNode("Рабочий стол")
+                    {
+                        Tag = desktopPath
+                    };
+                    if (HasAccessibleSubfolders(desktopPath))
+                    {
+                        desktopNode.Nodes.Add(new TreeNode("...загрузка..."));
+                    }
+                    favoritesNode.Nodes.Add(desktopNode);
+                }
+
+                // Загрузки
+                string downloadsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                if (Directory.Exists(downloadsPath))
+                {
+                    TreeNode downloadsNode = new TreeNode("Загрузки")
+                    {
+                        Tag = downloadsPath
+                    };
+                    if (HasAccessibleSubfolders(downloadsPath))
+                    {
+                        downloadsNode.Nodes.Add(new TreeNode("...загрузка..."));
+                    }
+                    favoritesNode.Nodes.Add(downloadsNode);
+                }
+
+                // Изображения
+                string picturesPath = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                if (Directory.Exists(picturesPath))
+                {
+                    TreeNode picturesNode = new TreeNode("Изображения")
+                    {
+                        Tag = picturesPath
+                    };
+                    if (HasAccessibleSubfolders(picturesPath))
+                    {
+                        picturesNode.Nodes.Add(new TreeNode("...загрузка..."));
+                    }
+                    favoritesNode.Nodes.Add(picturesNode);
+                }
+
+                // Музыка
+                string musicPath = Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+                if (Directory.Exists(musicPath))
+                {
+                    TreeNode musicNode = new TreeNode("Музыка")
+                    {
+                        Tag = musicPath
+                    };
+                    if (HasAccessibleSubfolders(musicPath))
+                    {
+                        musicNode.Nodes.Add(new TreeNode("...загрузка..."));
+                    }
+                    favoritesNode.Nodes.Add(musicNode);
+                }
+
+                treeFolders.Nodes.Add(favoritesNode);
+
+                // 2. Добавляем раздел "Этот компьютер" с дисками
+                TreeNode computerNode = new TreeNode("Этот компьютер")
+                {
+                    Tag = null
+                };
+
                 DriveInfo[] drives = DriveInfo.GetDrives();
 
                 foreach (DriveInfo drive in drives)
                 {
                     try
                     {
-                        // Проверяем, что диск готов (не вставлен ли DVD и т.д.)
                         if (!drive.IsReady)
                             continue;
 
-                        // Создаем узел для диска
-                        string driveName = drive.Name; // Например "C:\"
-                        TreeNode driveNode = new TreeNode(driveName)
+                        string driveName = drive.Name;
+                        string driveLabel = $"Диск {drive.Name.TrimEnd('\\')}";
+                        if (!string.IsNullOrEmpty(drive.VolumeLabel))
+                        {
+                            driveLabel = $"{drive.VolumeLabel} ({drive.Name.TrimEnd('\\')})";
+                        }
+
+                        TreeNode driveNode = new TreeNode(driveLabel)
                         {
                             Tag = driveName
                         };
 
-                        // Добавляем пустой узел-заглушку для отображения "плюсика" расширения
-                        // Это позволит TreeView показать, что можно раскрыть узел
-                        driveNode.Nodes.Add(new TreeNode("...загрузка..."));
+                        // Проверяем, есть ли подпапки
+                        if (HasAccessibleSubfolders(driveName))
+                        {
+                            driveNode.Nodes.Add(new TreeNode("...загрузка..."));
+                        }
 
-                        treeFolders.Nodes.Add(driveNode);
+                        computerNode.Nodes.Add(driveNode);
                     }
                     catch (Exception ex)
                     {
                         System.Diagnostics.Debug.WriteLine($"Ошибка инициализации диска {drive.Name}: {ex.Message}");
                     }
                 }
+
+                treeFolders.Nodes.Add(computerNode);
+
+                // Расширяем "Избранное" по умолчанию
+                if (favoritesNode.Nodes.Count > 0)
+                {
+                    favoritesNode.Expand();
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка при получении логических дисков: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Ошибка при инициализации TreeView: {ex.Message}");
             }
         }
 
@@ -397,19 +490,25 @@ namespace MyImageViewer.UI
         }
 
         /// <summary>
-        /// Поиск по названию файла
+        /// Поиск по названию файла (быстрый поиск в памяти через LINQ)
         /// </summary>
         private void txtSearch_TextChanged(object sender, EventArgs e)
         {
-            if (string.IsNullOrEmpty(_currentFolder))
+            if (_currentImages == null || _currentImages.Count == 0)
                 return;
 
-            string searchText = txtSearch.Text.Trim();
-            List<ImageFile> filteredImages = _fileService.LoadImagesFromFolder(_currentFolder, searchText);
+            string searchText = txtSearch.Text.Trim().ToLower();
 
+            // Фильтруем уже загруженные изображения из памяти через LINQ
+            List<ImageFile> filteredImages = string.IsNullOrEmpty(searchText)
+                ? _currentImages
+                : _currentImages.Where(img => img.FileName.ToLower().Contains(searchText)).ToList();
+
+            // Очищаем ListView и ImageList
             listThumbs.Clear();
             imgListThumbs.Images.Clear();
 
+            // Добавляем отфильтрованные изображения
             for (int i = 0; i < filteredImages.Count; i++)
             {
                 try
@@ -432,7 +531,6 @@ namespace MyImageViewer.UI
                 }
             }
 
-            _currentImages = filteredImages;
             toolStripStatusLabel1.Text = $"Найдено изображений: {listThumbs.Items.Count}";
         }
 

@@ -66,9 +66,9 @@
             // 
             statusBar.ImageScalingSize = new Size(20, 20);
             statusBar.Items.AddRange(new ToolStripItem[] { toolStripStatusLabel1, toolStripStatusLabel2 });
-            statusBar.Location = new Point(0, 774);
+            statusBar.Location = new Point(0, 727);
             statusBar.Name = "statusBar";
-            statusBar.Size = new Size(1400, 26);
+            statusBar.Size = new Size(1382, 26);
             statusBar.TabIndex = 2;
             statusBar.Text = "statusStrip1";
             // 
@@ -99,8 +99,8 @@
             // 
             splitContainer1.Panel2.Controls.Add(splitContainer3);
             splitContainer1.Panel2.Paint += splitContainer1_Panel2_Paint;
-            splitContainer1.Size = new Size(1400, 774);
-            splitContainer1.SplitterDistance = 418;
+            splitContainer1.Size = new Size(1382, 727);
+            splitContainer1.SplitterDistance = 413;
             splitContainer1.TabIndex = 3;
             splitContainer1.SplitterMoved += splitContainer1_SplitterMoved;
             // 
@@ -118,8 +118,8 @@
             // splitContainer2.Panel2
             // 
             splitContainer2.Panel2.Controls.Add(pictureBoxPreview);
-            splitContainer2.Size = new Size(418, 774);
-            splitContainer2.SplitterDistance = 398;
+            splitContainer2.Size = new Size(413, 727);
+            splitContainer2.SplitterDistance = 374;
             splitContainer2.TabIndex = 1;
             // 
             // treeFolders
@@ -127,7 +127,7 @@
             treeFolders.Dock = DockStyle.Fill;
             treeFolders.Location = new Point(0, 0);
             treeFolders.Name = "treeFolders";
-            treeFolders.Size = new Size(418, 398);
+            treeFolders.Size = new Size(413, 374);
             treeFolders.TabIndex = 0;
             treeFolders.AfterSelect += treeFolders_AfterSelect;
             // 
@@ -136,7 +136,7 @@
             pictureBoxPreview.Dock = DockStyle.Fill;
             pictureBoxPreview.Location = new Point(0, 0);
             pictureBoxPreview.Name = "pictureBoxPreview";
-            pictureBoxPreview.Size = new Size(418, 372);
+            pictureBoxPreview.Size = new Size(413, 349);
             pictureBoxPreview.SizeMode = PictureBoxSizeMode.Zoom;
             pictureBoxPreview.TabIndex = 0;
             pictureBoxPreview.TabStop = false;
@@ -155,8 +155,8 @@
             // splitContainer3.Panel2
             // 
             splitContainer3.Panel2.Controls.Add(listThumbs);
-            splitContainer3.Size = new Size(978, 774);
-            splitContainer3.SplitterDistance = 84;
+            splitContainer3.Size = new Size(965, 727);
+            splitContainer3.SplitterDistance = 79;
             splitContainer3.TabIndex = 2;
             // 
             // panelSearch
@@ -167,7 +167,7 @@
             panelSearch.Dock = DockStyle.Fill;
             panelSearch.Location = new Point(0, 0);
             panelSearch.Name = "panelSearch";
-            panelSearch.Size = new Size(978, 84);
+            panelSearch.Size = new Size(965, 79);
             panelSearch.TabIndex = 1;
             // 
             // btnClearSearch
@@ -203,10 +203,9 @@
             listThumbs.LargeImageList = imgListThumbs;
             listThumbs.Location = new Point(0, 0);
             listThumbs.Name = "listThumbs";
-            listThumbs.Size = new Size(978, 686);
+            listThumbs.Size = new Size(965, 644);
             listThumbs.TabIndex = 0;
             listThumbs.UseCompatibleStateImageBehavior = false;
-            listThumbs.View = View.Tile;
             listThumbs.SelectedIndexChanged += listThumbs_SelectedIndexChanged;
             listThumbs.DoubleClick += listThumbs_DoubleClick;
             // 
@@ -225,14 +224,13 @@
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(1400, 800);
+            ClientSize = new Size(1382, 753);
             Controls.Add(splitContainer1);
             Controls.Add(statusBar);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "MainForm";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Image Viewer";
-            Load += MainForm_Load_1;
             statusBar.ResumeLayout(false);
             statusBar.PerformLayout();
             splitContainer1.Panel1.ResumeLayout(false);
