@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Data.SQLite; // NuGet пакет
+using System.Data.SQLite;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -9,42 +9,59 @@ namespace MyImageViewer.Services
 {
     public class ThumbnailService
     {
-        private const int ThumbnailSize = 150; // Размер миниатюры
+        private const int ThumbnailSize = 150;
 
-        // Получить превью из кеша или сгенерировать
         public Image GetThumbnail(string filePath)
         {
+            // Проверяем существование файла
+            if (!File.Exists(filePath)) return null;
+
             long lastModified = new FileInfo(filePath).LastWriteTime.Ticks;
 
-            // 1. Пробуем найти в базе
-            using (var conn = DatabaseContext.GetConnection())
+            try
             {
-                conn.Open();
-                string sql = "SELECT Thumbnail, LastModified FROM Thumbnails WHERE FilePath = @path";
-                using (var cmd = new SQLiteCommand(sql, conn))
+                // 1. Пробуем найти в базе
+                using (var conn = DatabaseContext.GetConnection())
                 {
-                    cmd.Parameters.AddWithValue("@path", filePath);
-                    using (var reader = cmd.ExecuteReader())
+                    conn.Open();
+                    string sql = "SELECT Thumbnail, LastModified FROM Thumbnails WHERE FilePath = @path";
+                    using (var cmd = new SQLiteCommand(sql, conn))
                     {
-                        if (reader.Read())
+                        cmd.Parameters.AddWithValue("@path", filePath);
+                        using (var reader = cmd.ExecuteReader())
                         {
-                            long dbTime = (long)reader["LastModified"];
-                            // Если файл не менялся, берем из базы
-                            if (dbTime == lastModified)
+                            if (reader.Read())
                             {
-                                byte[] imgBytes = (byte[])reader["Thumbnail"];
-                                return ByteArrayToImage(imgBytes);
+                                long dbTime = Convert.ToInt64(reader["LastModified"]);
+                                // Если файл не менялся
+                                if (dbTime == lastModified)
+                                {
+                                    byte[] imgBytes = (byte[])reader["Thumbnail"];
+                                    return ByteArrayToImage(imgBytes);
+                                }
                             }
                         }
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                // Если ошибка БД, просто идем дальше генерировать превью
+                System.Diagnostics.Debug.WriteLine($"Ошибка чтения из БД: {ex.Message}");
+            }
 
-            // 2. Если в базе нет или устарел - создаем превью
+            // 2. Если в базе нет или устарел/ошибка - создаем превью
             Image thumb = CreateThumbnail(filePath);
             if (thumb != null)
             {
-                SaveToCache(filePath, thumb, lastModified);
+                try
+                {
+                    SaveToCache(filePath, thumb, lastModified);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка сохранения в БД: {ex.Message}");
+                }
             }
             return thumb;
         }
@@ -55,7 +72,6 @@ namespace MyImageViewer.Services
             {
                 using (Image original = Image.FromFile(path))
                 {
-                    // Пропорциональное масштабирование
                     int w, h;
                     if (original.Width > original.Height)
                     {
@@ -68,31 +84,46 @@ namespace MyImageViewer.Services
                         w = (int)(original.Width * ((float)ThumbnailSize / original.Height));
                     }
 
-                    return new Bitmap(original, new Size(w, h));
+                    // Создаем новую битмап
+                    Bitmap bmp = new Bitmap(w, h);
+                    using (Graphics g = Graphics.FromImage(bmp))
+                    {
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(original, 0, 0, w, h);
+                    }
+                    return bmp;
                 }
             }
-            catch { return null; }
+            catch
+            {
+                return null;
+            }
         }
 
         private void SaveToCache(string path, Image img, long modTime)
         {
-            byte[] imgBytes = ImageToByteArray(img);
-            using (var conn = DatabaseContext.GetConnection())
+            try
             {
-                conn.Open();
-                // INSERT OR REPLACE обновит запись, если путь уже есть
-                string sql = "INSERT OR REPLACE INTO Thumbnails (FilePath, Thumbnail, LastModified) VALUES (@p, @img, @mod)";
-                using (var cmd = new SQLiteCommand(sql, conn))
+                byte[] imgBytes = ImageToByteArray(img);
+                using (var conn = DatabaseContext.GetConnection())
                 {
-                    cmd.Parameters.AddWithValue("@p", path);
-                    cmd.Parameters.AddWithValue("@img", imgBytes);
-                    cmd.Parameters.AddWithValue("@mod", modTime);
-                    cmd.ExecuteNonQuery();
+                    conn.Open();
+                    string sql = "INSERT OR REPLACE INTO Thumbnails (FilePath, Thumbnail, LastModified) VALUES (@p, @img, @mod)";
+                    using (var cmd = new SQLiteCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@p", path);
+                        cmd.Parameters.AddWithValue("@img", imgBytes);
+                        cmd.Parameters.AddWithValue("@mod", modTime);
+                        cmd.ExecuteNonQuery();
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка кеширования: {ex.Message}");
             }
         }
 
-        // Хелперы для конвертации Картинка <-> Байты
         private byte[] ImageToByteArray(Image img)
         {
             using (MemoryStream ms = new MemoryStream())
@@ -104,9 +135,19 @@ namespace MyImageViewer.Services
 
         private Image ByteArrayToImage(byte[] arr)
         {
-            using (MemoryStream ms = new MemoryStream(arr))
+            try
             {
-                return Image.FromStream(ms);
+                using (MemoryStream ms = new MemoryStream(arr))
+                {
+                    // ВАЖНО: Image.FromStream требует открытый поток.
+                    // Но MemoryStream закрывается в using.
+                    // Поэтому создаем КОПИЮ Bitmap, которая не зависит от потока.
+                    return new Bitmap(ms);
+                }
+            }
+            catch
+            {
+                return null;
             }
         }
     }
