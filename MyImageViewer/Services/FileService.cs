@@ -52,28 +52,22 @@ namespace MyImageViewer.Services
                 {
                     string fileName = Path.GetFileName(path);
 
-                    // Применяем фильтр поиска (если передан)
-                    if (!string.IsNullOrWhiteSpace(searchFilter) && 
+                    if (!string.IsNullOrWhiteSpace(searchFilter) &&
                         !fileName.Contains(searchFilter, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
 
-                    // Создаем нашу модель
                     ImageFile imgFile = new ImageFile(path);
 
-                    // Загружаем размеры изображения
-                    using (System.Drawing.Image img = System.Drawing.Image.FromFile(path))
-                    {
-                        imgFile.Width = img.Width;
-                        imgFile.Height = img.Height;
-                    }
+                    // Размеры будем получать позже
+                    imgFile.Width = 0;
+                    imgFile.Height = 0;
 
                     images.Add(imgFile);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки {path}: {ex.Message}");
                     continue;
                 }
             }

@@ -154,5 +154,19 @@ namespace MyImageViewer.Services
 
             return $"{len:0.##} {sizes[order]}";
         }
+        public Size GetImageSize(string filePath)
+        {
+            try
+            {
+                using (Image img = Image.FromFile(filePath))
+                {
+                    return new Size(img.Width, img.Height);
+                }
+            }
+            catch
+            {
+                return Size.Empty;
+            }
+        }
     }
 }

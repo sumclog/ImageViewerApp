@@ -17,6 +17,8 @@ namespace MyImageViewer.UI
         private FileService _fileService;
         private ThumbnailService _thumbnailService;
         private List<ImageFile> _currentImages;
+        // Флаг наличия нативной SQLite (interop) библиотеки
+        private bool _dbNativeAvailable = true;
         private string _currentFolder;
 
         public MainForm()
@@ -30,6 +32,39 @@ namespace MyImageViewer.UI
             _fileService = new FileService();
             _thumbnailService = new ThumbnailService();
             _currentImages = new List<ImageFile>();
+
+            // Проверяем наличие нативной SQLite (SQLite.Interop.dll).
+            // Если DLL отсутствует, отключаем использование DB-кеша (если FileService поддерживает это).
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string interopPath1 = Path.Combine(baseDir, "SQLite.Interop.dll");
+                string interopPath2 = Path.Combine(baseDir, IntPtr.Size == 8 ? "x64" : "x86", "SQLite.Interop.dll");
+
+                if (!File.Exists(interopPath1) && !File.Exists(interopPath2))
+                {
+                    _dbNativeAvailable = false;
+                    System.Diagnostics.Debug.WriteLine("SQLite native interop DLL not found. Database caching will be disabled to avoid repeated DllNotFoundExceptions.");
+
+                    // Попытка отключить кеш БД в FileService через отражение, если соответствующее свойство существует.
+                    try
+                    {
+                        var prop = _fileService.GetType().GetProperty("UseDatabaseCache");
+                        if (prop != null && prop.CanWrite)
+                        {
+                            prop.SetValue(_fileService, false);
+                        }
+                    }
+                    catch
+                    {
+                        // Ничего не делаем — безопасно игнорируем, если свойства нет.
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error checking SQLite native DLL: {ex.Message}");
+            }
 
             // Инициализация ImageList с оптимальным размером
             imgListThumbs.ImageSize = new Size(120, 120);
@@ -77,7 +112,7 @@ namespace MyImageViewer.UI
         }
 
         /// <summary>
-        /// Инициализировать TreeView с "Избранным" и дисками как в FastStone
+        /// Инициализировать TreeView с "Избранным" и дисками
         /// </summary>
         private void InitializeTreeView()
         {
@@ -369,7 +404,7 @@ namespace MyImageViewer.UI
                 return;
             }
 
-            listThumbs.Clear();
+            listThumbs.Items.Clear();
             imgListThumbs.Images.Clear();
             _currentImages.Clear();
 
@@ -382,7 +417,8 @@ namespace MyImageViewer.UI
         }
 
         /// <summary>
-        /// BackgroundWorker: загрузка миниатюр
+        /// BackgroundWorker: загрузка миниатюр (стриминговый режим)
+        /// Загружает изображения по одному и сообщает о прогрессе
         /// </summary>
         private void ThumbWorker_DoWork(object sender, DoWorkEventArgs e)
         {
@@ -391,43 +427,76 @@ namespace MyImageViewer.UI
                 return;
 
             List<ImageFile> images = _fileService.LoadImagesFromFolder(folderPath, "");
-            List<Image> thumbnails = new List<Image>();
-
             int total = images.Count;
+
+            _currentImages = images; // Сохраняем список для поиска
+
             for (int i = 0; i < total; i++)
             {
+                if (thumbWorker.CancellationPending)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                ImageFile img = images[i];
+
                 try
                 {
-                    Image thumb = _thumbnailService.GetThumbnail(images[i].FullPath);
-                    if (thumb != null)
-                    {
-                        thumbnails.Add(thumb);
-                    }
-                    else
-                    {
-                        thumbnails.Add(null);
-                    }
+                    // Загружаем миниатюру одного файла
+                    Image thumb = _thumbnailService.GetThumbnail(img.FullPath);
 
-                    // Сообщаем о прогрессе
-                    int progress = (int)((i + 1) * 100 / total);
-                    thumbWorker.ReportProgress(progress, new { Images = images, Thumbnails = thumbnails });
+                    // Отправляем ОДИН элемент в UI поток
+                    thumbWorker.ReportProgress(i * 100 / total, new ThumbPacket
+                    {
+                        Index = i,
+                        Image = img,
+                        Thumbnail = thumb ?? CreateDefaultThumbnail()
+                    });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки миниатюры: {ex.Message}");
-                    thumbnails.Add(null);
+                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки миниатюры для {img.FileName}: {ex.Message}");
+
+                    // Отправляем элемент с default thumbnail при ошибке
+                    thumbWorker.ReportProgress(i * 100 / total, new ThumbPacket
+                    {
+                        Index = i,
+                        Image = img,
+                        Thumbnail = CreateDefaultThumbnail()
+                    });
                 }
             }
 
-            e.Result = new { Images = images, Thumbnails = thumbnails };
+            e.Result = total;
         }
 
         /// <summary>
-        /// BackgroundWorker: обновление прогресса
+        /// BackgroundWorker: обновление прогресса (добавляем элементы по одному)
         /// </summary>
         private void ThumbWorker_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            toolStripStatusLabel1.Text = $"Загрузка миниатюр: {e.ProgressPercentage}%";
+            var packet = e.UserState as ThumbPacket;
+            if (packet == null)
+            {
+                toolStripStatusLabel1.Text = $"Загрузка: {e.ProgressPercentage}%";
+                return;
+            }
+
+            // Добавляем картинку в ImageList
+            imgListThumbs.Images.Add(packet.Thumbnail);
+
+            // Создаём item сразу
+            ListViewItem item = new ListViewItem
+            {
+                ImageIndex = imgListThumbs.Images.Count - 1,
+                Text = packet.Image.FileName,
+                Tag = packet.Image
+            };
+
+            listThumbs.Items.Add(item);
+
+            toolStripStatusLabel1.Text = $"Загрузка: {packet.Index + 1} / ...";
         }
 
         /// <summary>
@@ -435,43 +504,22 @@ namespace MyImageViewer.UI
         /// </summary>
         private void ThumbWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            if (e.Error != null)
+            if (e.Cancelled)
             {
-                MessageBox.Show($"Ошибка при загрузке: {e.Error.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                toolStripStatusLabel1.Text = "Загрузка отменена";
                 return;
             }
 
-            dynamic result = e.Result;
-            List<ImageFile> images = result.Images;
-            List<Image> thumbnails = result.Thumbnails;
-
-            _currentImages = images;
-            listThumbs.Clear();
-            imgListThumbs.Images.Clear();
-
-            for (int i = 0; i < images.Count; i++)
+            if (e.Error != null)
             {
-                try
-                {
-                    Image thumb = thumbnails[i] ?? CreateDefaultThumbnail();
-                    imgListThumbs.Images.Add(thumb);
-
-                    ListViewItem item = new ListViewItem
-                    {
-                        ImageIndex = i,
-                        Text = images[i].FileName,
-                        Tag = images[i]
-                    };
-
-                    listThumbs.Items.Add(item);
-                }
-                catch
-                {
-                    continue;
-                }
+                MessageBox.Show($"Ошибка при загрузке: {e.Error.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                listThumbs.EndUpdate();
+                return;
             }
 
-            toolStripStatusLabel1.Text = $"Найдено изображений: {listThumbs.Items.Count}";
+            // EndUpdate после завершения загрузки
+            int count = listThumbs.Items.Count;
+            toolStripStatusLabel1.Text = $"Готово: {count} изображений";
             UpdateStatusBar();
         }
 
@@ -480,11 +528,16 @@ namespace MyImageViewer.UI
         /// </summary>
         private Image CreateDefaultThumbnail()
         {
-            Bitmap bmp = new Bitmap(64, 64);
+            int size = imgListThumbs?.ImageSize.Width ?? 120;
+            Bitmap bmp = new Bitmap(size, size);
             using (Graphics g = Graphics.FromImage(bmp))
             {
-                g.FillRectangle(Brushes.LightGray, 0, 0, 64, 64);
-                g.DrawString("?", new Font("Arial", 20), Brushes.Gray, 20, 15);
+                g.FillRectangle(Brushes.LightGray, 0, 0, size, size);
+                using (Font f = new Font("Arial", Math.Max(12, size/5)))
+                {
+                    SizeF textSize = g.MeasureString("?", f);
+                    g.DrawString("?", f, Brushes.Gray, (size - textSize.Width)/2, (size - textSize.Height)/2);
+                }
             }
             return bmp;
         }
@@ -504,8 +557,11 @@ namespace MyImageViewer.UI
                 ? _currentImages
                 : _currentImages.Where(img => img.FileName.ToLower().Contains(searchText)).ToList();
 
+            // BeginUpdate для оптимизации
+            listThumbs.BeginUpdate();
+
             // Очищаем ListView и ImageList
-            listThumbs.Clear();
+            listThumbs.Items.Clear();
             imgListThumbs.Images.Clear();
 
             // Добавляем отфильтрованные изображения
@@ -531,6 +587,9 @@ namespace MyImageViewer.UI
                 }
             }
 
+            // EndUpdate после обновления
+            listThumbs.EndUpdate();
+
             toolStripStatusLabel1.Text = $"Найдено изображений: {listThumbs.Items.Count}";
         }
 
@@ -551,6 +610,16 @@ namespace MyImageViewer.UI
                 return;
 
             ImageFile selectedImage = listThumbs.SelectedItems[0].Tag as ImageFile;
+            // Загружаем размеры только один раз
+            if (selectedImage.Width == 0 || selectedImage.Height == 0)
+            {
+                ImageService imageService = new ImageService();
+
+                Size size = imageService.GetImageSize(selectedImage.FullPath);
+
+                selectedImage.Width = size.Width;
+                selectedImage.Height = size.Height;
+            }
             if (selectedImage == null)
                 return;
 
@@ -600,6 +669,7 @@ namespace MyImageViewer.UI
                 if (fullImage != null)
                 {
                     pictureBoxPreview.Image = fullImage;
+                    UpdateStatusBar();
                 }
                 else
                 {
@@ -623,7 +693,16 @@ namespace MyImageViewer.UI
                 ImageFile img = listThumbs.SelectedItems[0].Tag as ImageFile;
                 if (img != null)
                 {
-                    string info = $"{img.FileName} ({img.Width}×{img.Height})";
+                    string info;
+
+                    if (img.Width > 0 && img.Height > 0)
+                    {
+                        info = $"{img.FileName} ({img.Width}×{img.Height})";
+                    }
+                    else
+                    {
+                        info = img.FileName;
+                    }
                     string size = FormatFileSize(img.Size);
                     toolStripStatusLabel1.Text = info;
                     toolStripStatusLabel2.Text = size;
@@ -664,6 +743,54 @@ namespace MyImageViewer.UI
         }
 
         private void MainForm_Load_1(object sender, EventArgs e)
+        {
+
+        }
+
+        private void thumbWorker_DoWork_1(object sender, DoWorkEventArgs e)
+        {
+            string folderPath = e.Argument as string;
+            if (string.IsNullOrEmpty(folderPath))
+                return;
+
+            List<ImageFile> images = _fileService.LoadImagesFromFolder(folderPath, "");
+            int total = images.Count;
+
+            for (int i = 0; i < total; i++)
+            {
+                if (thumbWorker.CancellationPending)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                ImageFile img = images[i];
+
+                try
+                {
+                    Image thumb = _thumbnailService.GetThumbnail(img.FullPath);
+
+                    // отправляем ОДИН элемент, а не список
+                    thumbWorker.ReportProgress(i * 100 / total, new ThumbPacket
+                    {
+                        Index = i,
+                        Image = img,
+                        Thumbnail = thumb ?? CreateDefaultThumbnail()
+                    });
+                }
+                catch
+                {
+                    thumbWorker.ReportProgress(i * 100 / total, new ThumbPacket
+                    {
+                        Index = i,
+                        Image = img,
+                        Thumbnail = CreateDefaultThumbnail()
+                    });
+                }
+            }
+        }
+
+        private void toolStripStatusLabel1_Click(object sender, EventArgs e)
         {
 
         }

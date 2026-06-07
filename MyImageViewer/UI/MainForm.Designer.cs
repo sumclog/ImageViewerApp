@@ -77,6 +77,7 @@
             toolStripStatusLabel1.Name = "toolStripStatusLabel1";
             toolStripStatusLabel1.Size = new Size(52, 20);
             toolStripStatusLabel1.Text = "lblInfo";
+            toolStripStatusLabel1.Click += toolStripStatusLabel1_Click;
             // 
             // toolStripStatusLabel2
             // 

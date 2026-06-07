@@ -10,6 +10,32 @@ namespace MyImageViewer.Services
     public class ThumbnailService
     {
         private const int ThumbnailSize = 150;
+        // Флаг доступности нативной SQLite (interop) библиотеки
+        private static bool _dbAvailable = true;
+
+        static ThumbnailService()
+        {
+            try
+            {
+                // Попытка открыть соединение и сразу закрыть для проверки наличия нативной библиотеки
+                using (var conn = DatabaseContext.GetConnection())
+                {
+                    conn.Open();
+                    conn.Close();
+                }
+            }
+            catch (System.DllNotFoundException dllEx)
+            {
+                _dbAvailable = false;
+                System.Diagnostics.Debug.WriteLine($"SQLite native interop missing: {dllEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                // При прочих ошибках также отключаем использование кеша, чтобы избежать частых исключений
+                _dbAvailable = false;
+                System.Diagnostics.Debug.WriteLine($"SQLite check failed: {ex.Message}");
+            }
+        }
 
         public Image GetThumbnail(string filePath)
         {
@@ -20,29 +46,38 @@ namespace MyImageViewer.Services
 
             try
             {
-                // 1. Пробуем найти в базе
-                using (var conn = DatabaseContext.GetConnection())
+                // 1. Пробуем найти в базе (только если нативный interop доступен)
+                if (_dbAvailable)
                 {
-                    conn.Open();
-                    string sql = "SELECT Thumbnail, LastModified FROM Thumbnails WHERE FilePath = @path";
-                    using (var cmd = new SQLiteCommand(sql, conn))
+                    using (var conn = DatabaseContext.GetConnection())
                     {
-                        cmd.Parameters.AddWithValue("@path", filePath);
-                        using (var reader = cmd.ExecuteReader())
+                        conn.Open();
+                        string sql = "SELECT Thumbnail, LastModified FROM Thumbnails WHERE FilePath = @path";
+                        using (var cmd = new SQLiteCommand(sql, conn))
                         {
-                            if (reader.Read())
+                            cmd.Parameters.AddWithValue("@path", filePath);
+                            using (var reader = cmd.ExecuteReader())
                             {
-                                long dbTime = Convert.ToInt64(reader["LastModified"]);
-                                // Если файл не менялся
-                                if (dbTime == lastModified)
+                                if (reader.Read())
                                 {
-                                    byte[] imgBytes = (byte[])reader["Thumbnail"];
-                                    return ByteArrayToImage(imgBytes);
+                                    long dbTime = Convert.ToInt64(reader["LastModified"]);
+                                    // Если файл не менялся
+                                    if (dbTime == lastModified)
+                                    {
+                                        byte[] imgBytes = (byte[])reader["Thumbnail"];
+                                        return ByteArrayToImage(imgBytes);
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+            catch (System.DllNotFoundException dllEx)
+            {
+                // Если нативная библиотека отсутствует, отключаем кеш для дальнейшей работы
+                _dbAvailable = false;
+                System.Diagnostics.Debug.WriteLine($"Ошибка чтения из БД (interop missing): {dllEx.Message}");
             }
             catch (Exception ex)
             {
@@ -56,7 +91,15 @@ namespace MyImageViewer.Services
             {
                 try
                 {
-                    SaveToCache(filePath, thumb, lastModified);
+                    if (_dbAvailable)
+                    {
+                        SaveToCache(filePath, thumb, lastModified);
+                    }
+                }
+                catch (System.DllNotFoundException dllEx)
+                {
+                    _dbAvailable = false;
+                    System.Diagnostics.Debug.WriteLine($"Ошибка сохранения в БД (interop missing): {dllEx.Message}");
                 }
                 catch (Exception ex)
                 {
